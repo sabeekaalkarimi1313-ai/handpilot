@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hand Pilot 3D - Gesture Space Fighter</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#050816">
+<style>
+  :root{--ink:#e8f1ff;--cy:#37d5ff;--gr:#3dff9a;--rd:#ff4d6d;--yl:#ffd23f;--pu:#a78bfa}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;overflow:hidden;background:#050816;color:var(--ink);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;touch-action:none;overscroll-behavior:none}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block}
+  /* HUD */
+  #hud{position:fixed;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));display:grid;gap:6px;width:min(250px,52vw);pointer-events:none}
+  .pill{background:rgba(8,16,40,.72);border:1px solid rgba(120,190,255,.35);border-radius:14px;padding:6px 11px;font-weight:800;font-size:clamp(13px,3.6vw,16px);backdrop-filter:blur(4px)}
+  #score{font-size:clamp(20px,6vw,28px);color:var(--yl)}
+  .bar{height:11px;border-radius:6px;background:rgba(255,255,255,.14);overflow:hidden;margin-top:4px}
+  .bar i{display:block;height:100%;width:100%;border-radius:6px;transition:width .1s}
+  #hullF{background:linear-gradient(90deg,#ff4d6d,#3dff9a)} #enF{background:var(--cy)} #bmF{background:var(--pu)}
+  /* webcam preview (mirrored) */
+  #pv{position:fixed;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));width:min(168px,34vw);aspect-ratio:4/3;border-radius:14px;overflow:hidden;border:2px solid rgba(120,190,255,.6);background:#000;box-shadow:0 4px 18px rgba(0,0,0,.5);display:none}
+  #pv video,#pv canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+  #gest{position:absolute;left:0;right:0;bottom:0;text-align:center;font-weight:900;font-size:clamp(11px,3vw,14px);padding:3px;background:rgba(0,0,0,.6);z-index:2}
+  #status{position:fixed;right:max(10px,env(safe-area-inset-right));top:calc(max(10px,env(safe-area-inset-top)) + min(126px,25.5vw) + 12px);font-weight:800;font-size:12px;text-align:right;max-width:34vw;display:none}
+  #legend{position:fixed;left:50%;bottom:max(10px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:min(96vw,640px);pointer-events:none}
+  #legend b{background:rgba(8,16,40,.72);border:1px solid rgba(120,190,255,.35);border-radius:12px;padding:5px 10px;font-size:clamp(11px,3vw,14px)}
+  #banner{position:fixed;left:0;right:0;top:30%;text-align:center;font-weight:900;font-size:clamp(24px,7vw,48px);text-shadow:0 0 18px currentColor;pointer-events:none;opacity:0;transition:opacity .25s}
+  #lost{position:fixed;left:50%;top:58%;transform:translateX(-50%);background:rgba(255,77,109,.85);padding:8px 16px;border-radius:14px;font-weight:800;display:none;pointer-events:none;text-align:center}
+  /* panels */
+  .panel{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:18px;text-align:center;background:radial-gradient(circle at 50% 30%,rgba(20,40,100,.92),rgba(3,6,20,.97));z-index:5;overflow:auto}
+  .panel[hidden]{display:none}
+  h1{margin:0;font-size:clamp(30px,8.5vw,54px);line-height:1;text-shadow:0 0 22px var(--cy)}
+  h1 small{display:block;font-size:.4em;color:var(--cy);letter-spacing:3px;margin-top:6px}
+  .how{display:grid;gap:8px;max-width:460px;width:100%;text-align:left;font-size:clamp(14px,3.8vw,17px)}
+  .how div{background:rgba(255,255,255,.08);border-radius:14px;padding:9px 13px}
+  button{font:inherit;font-weight:900;border:0;border-radius:18px;padding:15px 18px;font-size:clamp(17px,4.8vw,22px);color:#04122a;background:var(--gr);box-shadow:0 5px 0 rgba(0,0,0,.35);cursor:pointer;min-height:56px;width:100%;max-width:460px;touch-action:manipulation}
+  button:active{transform:translateY(3px);box-shadow:0 2px 0 rgba(0,0,0,.35)} button.alt{background:var(--cy)} button:disabled{opacity:.55}
+  #note{font-size:13px;opacity:.8;max-width:460px;min-height:34px} #note.err{color:#ff8fa3;opacity:1;font-weight:700}
+  #oText{font-size:clamp(20px,5.5vw,28px);line-height:1.6} #oText b{font-size:1.5em;color:var(--yl)}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud">
+  <div class="pill" id="score">0</div>
+  <div class="pill">Wave <span id="lvl">1</span> · Kills <span id="kills">0</span>
+    <div class="bar" title="hull"><i id="hullF"></i></div>
+    <div class="bar" title="shield energy"><i id="enF"></i></div>
+    <div class="bar" title="bomb"><i id="bmF"></i></div>
+  </div>
+</div>
+<div id="pv"><video id="v" playsinline webkit-playsinline muted autoplay></video><canvas id="ov" width="320" height="240"></canvas><div id="gest">—</div></div>
+<div id="status"></div>
+<div id="legend"><b>🖐 Palm = fly</b><b>☝️ Point = FIRE</b><b>✊ Fist = SHIELD</b><b>✌️ Peace = BOMB</b></div>
+<div id="banner"></div>
+<div id="lost">🖐 Show your hand to the camera</div>
+
+<div class="panel" id="start">
+  <h1>🚀 HAND PILOT 3D<small>GESTURE SPACE FIGHTER</small></h1>
+  <div class="how">
+    <div>🖐 <b>Move your hand</b> — your spaceship follows it (left, right, up, down).</div>
+    <div>☝️ <b>Point</b> with your index finger — lasers fire at the rocks and drones.</div>
+    <div>✊ <b>Fist</b> — raises a shield (uses energy). &nbsp; ✌️ <b>Peace sign</b> — screen-clearing bomb.</div>
+    <div>💎 Fly into gold crystals for bonus points and energy. Don't let anything hit your hull!</div>
+  </div>
+  <button id="camBtn">📷 PLAY WITH HAND CAMERA</button>
+  <button class="alt" id="mouseBtn">🖱️ PLAY WITH MOUSE / TOUCH</button>
+  <div id="note">Camera needs https (or localhost) and internet the first time. Video stays on your device. Mouse mode: move = fly · hold click = fire · Space = shield · B = bomb (on touch: 2 fingers = shield, 3 = bomb).</div>
+</div>
+<div class="panel" id="over" hidden>
+  <h1>💥 SHIP DESTROYED</h1>
+  <div id="oText"></div>
+  <button id="againBtn">🔁 FLY AGAIN</button>
+  <button class="alt" id="menuBtn">🏠 MENU</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+if (!window.THREE) { $('note').textContent = 'Could not load Three.js from the CDN. Check your internet connection and reload.'; $('note').className = 'err'; $('camBtn').disabled = $('mouseBtn').disabled = true; return; }
+
+/* =====================================================================
+   1. THREE.JS SCENE
+   ===================================================================== */
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050816);
+scene.fog = new THREE.Fog(0x050816, 40, 105);
+const camera = new THREE.PerspectiveCamera(50, 1, .1, 400);
+const CAM_D = 9;             // camera distance behind the play plane (z = 0)
+let halfW = 6, halfH = 3.5;  // size of the play area, recomputed on resize
+
+function resize() {
+  const w = innerWidth, h = innerHeight, a = w / h;
+  renderer.setSize(w, h, false);
+  // keep ~6.5 world units visible sideways even on tall phone screens
+  const vf = clamp(2 * Math.atan(.74 * (6.5 / 8) / a * 1.25), .55, 1.45);
+  camera.fov = THREE.MathUtils.radToDeg(vf); camera.aspect = a;
+  camera.position.set(0, 1.6, CAM_D); camera.lookAt(0, 0.2, -14); camera.updateProjectionMatrix();
+  const th = Math.tan(vf / 2) * CAM_D; halfH = th * .72; halfW = Math.min(th * a * .8, 8.5);
+}
+addEventListener('resize', resize);
+
+scene.add(new THREE.HemisphereLight(0x9fc4ff, 0x1b1030, .9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1); sun.position.set(4, 8, 6); scene.add(sun);
+const shipLight = new THREE.PointLight(0x37d5ff, 1.2, 14); scene.add(shipLight);
+
+// star field flying towards the camera (gives the feeling of speed)
+const STARS = 900, starGeo = new THREE.BufferGeometry(), sp = new Float32Array(STARS * 3);
+for (let i = 0; i < STARS; i++) { sp[i * 3] = rnd(-70, 70); sp[i * 3 + 1] = rnd(-45, 45); sp[i * 3 + 2] = rnd(-130, 12); }
+starGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xcfe3ff, size: .35, transparent: true, opacity: .9, depthWrite: false }));
+scene.add(stars);
+// a far planet and a nebula glow for depth
+const planet = new THREE.Mesh(new THREE.SphereGeometry(18, 32, 24), new THREE.MeshStandardMaterial({ color: 0x3b5bdb, emissive: 0x0d1b5e, roughness: .9 }));
+planet.position.set(-46, 18, -150); scene.add(planet);
+const ring = new THREE.Mesh(new THREE.RingGeometry(24, 34, 64), new THREE.MeshBasicMaterial({ color: 0x9db4ff, side: THREE.DoubleSide, transparent: true, opacity: .35 }));
+ring.position.copy(planet.position); ring.rotation.x = 1.2; ring.rotation.y = .3; scene.add(ring);
+const sunFar = new THREE.Mesh(new THREE.SphereGeometry(7, 20, 14), new THREE.MeshBasicMaterial({ color: 0xffb36b, fog: false }));
+sunFar.position.set(60, 26, -170); scene.add(sunFar);
+
+/* ---- player ship (all built from primitives) ---- */
+const ship = new THREE.Group();
+const hullM = new THREE.MeshStandardMaterial({ color: 0xdfe8ff, metalness: .5, roughness: .35 });
+const accentM = new THREE.MeshStandardMaterial({ color: 0x37d5ff, emissive: 0x0a6a8a, metalness: .3, roughness: .4 });
+const body = new THREE.Mesh(new THREE.ConeGeometry(.42, 2, 12), hullM); body.rotation.x = -Math.PI / 2; ship.add(body);
+const cockpit = new THREE.Mesh(new THREE.SphereGeometry(.3, 14, 10), new THREE.MeshStandardMaterial({ color: 0x7fe9ff, emissive: 0x1a8fb0, transparent: true, opacity: .9 })); cockpit.position.set(0, .22, .1); cockpit.scale.set(1, .7, 1.5); ship.add(cockpit);
+for (const sx of [-1, 1]) {
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(1.35, .07, .85), accentM); wing.position.set(sx * .85, -.04, .45); wing.rotation.z = sx * -.12; wing.rotation.y = sx * .35; ship.add(wing);
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(.1, .35, .5), hullM); tip.position.set(sx * 1.45, .08, .65); ship.add(tip);
+}
+const flame = new THREE.Mesh(new THREE.ConeGeometry(.22, 1.1, 10), new THREE.MeshBasicMaterial({ color: 0xffa94d, transparent: true, opacity: .9 })); flame.rotation.x = Math.PI / 2; flame.position.z = 1.45; ship.add(flame);
+const shield = new THREE.Mesh(new THREE.SphereGeometry(1.7, 24, 16), new THREE.MeshBasicMaterial({ color: 0x4dc9ff, transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false })); shield.visible = false; ship.add(shield);
+scene.add(ship);
+
+/* =====================================================================
+   2. GAME STATE
+   ===================================================================== */
+const G = { mode: 'menu', useCam: false, score: 0, kills: 0, level: 1, hull: 100, energy: 100, bomb: 0, t: 0, spawn: 1, fire: 0, shielding: false, shieldLock: false,
+  tx: 0, ty: 0, vx: 0, enemies: [], shots: [], fx: [], flash: 0, shake: 0, invul: 0, gesture: 'NONE', handSeen: 0, bombFx: null, mouseDown: false, touchN: 0 };
+window.__G = G;
+const INPUT = { x: 0, y: 0, fire: false, shield: false, bomb: false };   // filled by hand or mouse
+
+const astGeo = new THREE.IcosahedronGeometry(1, 0), astMat = new THREE.MeshStandardMaterial({ color: 0x8a8f9c, flatShading: true, roughness: .95 });
+const droneGeo = new THREE.OctahedronGeometry(.8, 0), droneMat = new THREE.MeshStandardMaterial({ color: 0xff4d6d, emissive: 0x7a0d22, flatShading: true });
+const crysGeo = new THREE.OctahedronGeometry(.6, 0), crysMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0xb07a00, metalness: .6, roughness: .2 });
+const shotGeo = new THREE.BoxGeometry(.09, .09, 1.6), shotMat = new THREE.MeshBasicMaterial({ color: 0x7dfcff });
+const fxGeo = new THREE.BoxGeometry(.16, .16, .16);
+
+function spawnEnemy() {
+  const r = Math.random(), x = rnd(-halfW, halfW), y = rnd(-halfH, halfH);
+  let e;
+  if (r < .16) { e = { type: 'crystal', mesh: new THREE.Mesh(crysGeo, crysMat), hp: 1, rad: .9, pts: 50 }; }
+  else if (r < .45 + Math.min(.15, G.level * .02)) { e = { type: 'drone', mesh: new THREE.Mesh(droneGeo, droneMat), hp: 1, rad: .9, pts: 30, ph: rnd(0, 6), amp: rnd(1, 3) }; }
+  else { const s = rnd(.9, 1.9); const m = new THREE.Mesh(astGeo, astMat); m.scale.set(s, s * rnd(.8, 1.1), s); e = { type: 'rock', mesh: m, hp: s > 1.5 ? 2 : 1, rad: s * .95, pts: s > 1.5 ? 40 : 20 }; }
+  e.mesh.position.set(x, y, -95); e.vx0 = x; e.spin = new THREE.Vector3(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)); e.hit = 0;
+  scene.add(e.mesh); G.enemies.push(e);
+}
+function boom(pos, color, n, sp0) {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(fxGeo, new THREE.MeshBasicMaterial({ color, transparent: true }));
+    m.position.copy(pos); const v = new THREE.Vector3(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).normalize().multiplyScalar(rnd(2, sp0 || 9));
+    scene.add(m); G.fx.push({ m, v, life: rnd(.4, .9) });
+  }
+}
+function killEnemy(e, byBomb) {
+  scene.remove(e.mesh); G.enemies.splice(G.enemies.indexOf(e), 1);
+  boom(e.mesh.position, e.type === 'drone' ? 0xff6b86 : (e.type === 'crystal' ? 0xffe27a : 0xc7ccd8), 16);
+  G.score += e.pts; G.kills++; sBoom(e.type === 'rock' ? 1 : .7);
+  if (G.level < 1 + Math.floor(G.score / 600)) { G.level++; banner('WAVE ' + G.level + ' ⚡', '#ffd23f'); sUp(); }
+}
+function fireLaser() {
+  for (const sx of [-.55, .55]) {
+    const m = new THREE.Mesh(shotGeo, shotMat); m.position.set(ship.position.x + sx, ship.position.y, ship.position.z - 1.1); scene.add(m); G.shots.push(m);
+  }
+  sLaser();
+}
+function hurt(dmg) {
+  if (G.invul > 0) return;
+  G.hull = Math.max(0, G.hull - dmg); G.invul = .9; G.shake = .5; G.flash = .5; sHit(); if (navigator.vibrate) navigator.vibrate(120);
+  if (G.hull <= 0) endGame();
+}
+function triggerBomb() {
+  if (G.bomb > 0 || G.mode !== 'play') return;
+  G.bomb = 8; sBomb(); banner('✌️ BOMB!', '#a78bfa'); G.shake = .6;
+  for (const e of G.enemies.slice()) if (e.type !== 'crystal') killEnemy(e, true);
+  const r = new THREE.Mesh(new THREE.RingGeometry(.8, 1.2, 48), new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, side: THREE.DoubleSide }));
+  r.position.copy(ship.position); scene.add(r); G.bombFx = { r, t: 0 };
+}
+
+/* ---------- audio ---------- */
+let AC = null;
+function audio() { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }
+function tone(f0, f1, d, type, v, delay) {
+  if (!AC) return; try { const t = AC.currentTime + (delay || 0), o = AC.createOscillator(), gn = AC.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + d); gn.gain.setValueAtTime(.0001, t); gn.gain.exponentialRampToValueAtTime(v || .1, t + .01); gn.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(gn); gn.connect(AC.destination); o.start(t); o.stop(t + d + .02); } catch (e) {}
+}
+const sLaser = () => tone(1300, 400, .1, 'square', .035), sBoom = v => { tone(220, 50, .3, 'sawtooth', .09 * v); tone(120, 40, .35, 'square', .05 * v); };
+const sHit = () => { tone(150, 50, .4, 'sawtooth', .18); }, sBomb = () => { tone(90, 30, 1, 'sawtooth', .2); tone(600, 80, .8, 'triangle', .1); };
+const sUp = () => { tone(520, 520, .1, 'triangle', .1); tone(780, 780, .1, 'triangle', .1, .1); tone(1040, 1040, .2, 'triangle', .1, .2); }, sCrystal = () => { tone(900, 900, .08, 'sine', .12); tone(1350, 1350, .15, 'sine', .12, .08); };
+const sShield = () => tone(300, 700, .25, 'sine', .08);
+
+/* =====================================================================
+   3. HAND TRACKING (MediaPipe Hands from CDN)
+   ===================================================================== */
+const HANDS_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/';
+const vid = $('v'), ov = $('ov'), octx = ov.getContext('2d');
+let hands = null, handsReady = false, busy = false, lastVT = -1, camStream = null, prevHand = null;
+const GS = { cand: 'NONE', n: 0, stable: 'NONE' };   // gesture smoothing: needs 5 identical frames in a row
+const GICON = { NONE: '—', PALM: '🖐 FLY', POINT: '☝️ FIRE', FIST: '✊ SHIELD', PEACE: '✌️ BOMB' };
+
+function note(t, err) { const n = $('note'); n.textContent = t; n.className = err ? 'err' : ''; }
+function loadScript(src, ms) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous'; const to = setTimeout(() => rej(new Error('timeout')), ms); s.onload = () => { clearTimeout(to); res(); }; s.onerror = () => { clearTimeout(to); rej(new Error('load')); }; document.head.appendChild(s); }); }
+async function startCamera() {
+  audio();
+  if (handsReady && camStream) { G.useCam = true; startGame(); return; }
+  $('camBtn').disabled = $('mouseBtn').disabled = true;
+  try {
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('insecure'), { name: 'Insecure' });
+    note('Asking for the camera…');
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 30 } }, audio: false });
+    vid.muted = true; vid.setAttribute('playsinline', ''); vid.autoplay = true; vid.srcObject = camStream; await vid.play();
+    $('pv').style.display = 'block'; $('status').style.display = 'block';
+    note('Loading the hand tracker (first time takes a few seconds)…');
+    if (!window.Hands) await loadScript(HANDS_URL + 'hands.js', 30000);
+    hands = new window.Hands({ locateFile: f => HANDS_URL + f });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: .6, minTrackingConfidence: .5, selfieMode: false });
+    hands.onResults(onResults); await hands.initialize();
+    handsReady = true; G.useCam = true; startGame();
+  } catch (e) {
+    console.warn(e);
+    let m = 'Could not start the hand camera. You can still play with mouse / touch!';
+    if (e.name === 'Insecure') m = 'The camera only works on https or localhost (not file:// or some embedded previews). Host it (e.g. GitHub Pages) or play with the mouse.';
+    else if (e.name === 'NotAllowedError') m = 'Camera permission was blocked. Allow it in the browser settings, or play with the mouse.';
+    else if (e.name === 'NotFoundError') m = 'No camera found. Play with the mouse instead!';
+    else if (e.message === 'timeout' || e.message === 'load') m = 'Could not download the hand tracker (needs internet). Check your connection or play with the mouse.';
+    note(m, true); if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } $('pv').style.display = 'none'; $('status').style.display = 'none';
+  }
+  $('camBtn').disabled = $('mouseBtn').disabled = false;
+}
+function pump() { if (!handsReady || busy || vid.readyState < 2 || vid.currentTime === lastVT) return; lastVT = vid.currentTime; busy = true; Promise.resolve(hands.send({ image: vid })).catch(() => {}).then(() => { busy = false; }); }
+
+const dist2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function classify(lm) {
+  // a finger is "extended" when its tip is further from the wrist than its middle joint
+  const ext = (tip, pip) => dist2(lm[tip], lm[0]) > dist2(lm[pip], lm[0]) * 1.08;
+  const i = ext(8, 6), m = ext(12, 10), r = ext(16, 14), p = ext(20, 18), n = i + m + r + p;
+  if (n === 0) return 'FIST';
+  if (n === 4) return 'PALM';
+  if (i && m && !r && !p) return 'PEACE';
+  if (i && !m && !r && !p) return 'POINT';
+  return 'NONE';
+}
+function onResults(res) {
+  const L = res.multiHandLandmarks || [];
+  octx.clearRect(0, 0, ov.width, ov.height);
+  if (!L.length) { G.hand = null; prevHand = null; return; }
+  // keep following the same hand (the one closest to where we saw it last)
+  let lm = L[0]; if (prevHand && L.length > 1) { let bd = 9; for (const c of L) { const d = Math.hypot(c[9].x - prevHand.x, c[9].y - prevHand.y); if (d < bd) { bd = d; lm = c; } } }
+  prevHand = { x: lm[9].x, y: lm[9].y };
+  const raw = classify(lm);
+  if (raw === GS.cand) GS.n++; else { GS.cand = raw; GS.n = 1; }
+  if (GS.n >= 5) GS.stable = GS.cand;
+  // palm centre -> mirrored (selfie) normalised coords. The preview is mirrored with CSS, so left/right match what you see
+  G.hand = { x: 1 - lm[9].x, y: lm[9].y }; G.handSeen = performance.now(); G.gesture = GS.stable;
+  // draw skeleton on the preview overlay
+  octx.strokeStyle = '#3dff9a'; octx.fillStyle = '#ffd23f'; octx.lineWidth = 2;
+  const C = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [5, 9, 10, 11, 12], [9, 13, 14, 15, 16], [13, 17, 18, 19, 20], [0, 17]];
+  for (const ch of C) { octx.beginPath(); ch.forEach((k, j) => { const x = lm[k].x * ov.width, y = lm[k].y * ov.height; j ? octx.lineTo(x, y) : octx.moveTo(x, y); }); octx.stroke(); }
+  for (const p of lm) { octx.beginPath(); octx.arc(p.x * ov.width, p.y * ov.height, 3, 0, 6.29); octx.fill(); }
+}
+function readHand() {
+  const seen = performance.now() - G.handSeen < 500 && G.hand;
+  $('lost').style.display = (G.mode === 'play' && !seen) ? 'block' : 'none';
+  $('status').textContent = seen ? '✅ hand tracked' : '❌ no hand'; $('status').style.color = seen ? '#3dff9a' : '#ff8fa3';
+  $('gest').textContent = seen ? GICON[G.gesture] || '—' : 'no hand';
+  if (!seen) { INPUT.fire = INPUT.shield = INPUT.bomb = false; return; }
+  INPUT.x = clamp((G.hand.x - .5) / .34, -1, 1);       // use the middle 68% of the camera view so you never have to leave the frame
+  INPUT.y = clamp((.5 - G.hand.y) / .28, -1, 1);
+  INPUT.fire = G.gesture === 'POINT'; INPUT.shield = G.gesture === 'FIST'; INPUT.bomb = G.gesture === 'PEACE';
+}
+
+/* =====================================================================
+   4. MOUSE / TOUCH / KEYBOARD FALLBACK
+   ===================================================================== */
+const keys = {};
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+const touches = new Map();
+function ptrPos(e) { INPUT.x = clamp((e.clientX / innerWidth - .5) * 2.1, -1, 1); INPUT.y = clamp((.5 - e.clientY / innerHeight) * 2.3, -1, 1); }
+canvas.addEventListener('pointerdown', e => { if (G.useCam) return; audio(); touches.set(e.pointerId, 1); G.touchN = touches.size; G.mouseDown = true; ptrPos(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} });
+canvas.addEventListener('pointermove', e => { if (!G.useCam) ptrPos(e); });
+const pUp = e => { touches.delete(e.pointerId); G.touchN = touches.size; if (!touches.size) G.mouseDown = false; };
+canvas.addEventListener('pointerup', pUp); canvas.addEventListener('pointercancel', pUp);
+function readMouse() {
+  if (keys.arrowleft || keys.a) INPUT.x = clamp(INPUT.x - .03, -1, 1); if (keys.arrowright || keys.d) INPUT.x = clamp(INPUT.x + .03, -1, 1);
+  if (keys.arrowup || keys.w) INPUT.y = clamp(INPUT.y + .03, -1, 1); if (keys.arrowdown || keys.s) INPUT.y = clamp(INPUT.y - .03, -1, 1);
+  INPUT.fire = G.mouseDown && G.touchN < 2 || !!keys.f; INPUT.shield = !!keys[' '] || G.touchN === 2; INPUT.bomb = !!keys.b || G.touchN >= 3;
+}
+
+/* =====================================================================
+   5. GAME FLOW + MAIN LOOP
+   ===================================================================== */
+let bannerT = 0;
+function banner(text, color) { const b = $('banner'); b.textContent = text; b.style.color = color; b.style.opacity = 1; clearTimeout(bannerT); bannerT = setTimeout(() => b.style.opacity = 0, 1100); }
+function clearWorld() { for (const e of G.enemies) scene.remove(e.mesh); for (const s of G.shots) scene.remove(s); for (const f of G.fx) scene.remove(f.m); if (G.bombFx) scene.remove(G.bombFx.r); Object.assign(G, { enemies: [], shots: [], fx: [], bombFx: null }); }
+function startGame() {
+  clearWorld(); GS.cand = 'NONE'; GS.n = 0; GS.stable = 'NONE';
+  Object.assign(G, { mode: 'play', score: 0, kills: 0, level: 1, hull: 100, energy: 100, bomb: 0, t: 0, spawn: 1, fire: 0, shielding: false, shieldLock: false, flash: 0, shake: 0, invul: 1, tx: 0, ty: 0, vx: 0 });
+  ship.visible = true; ship.position.set(0, 0, 0); INPUT.x = INPUT.y = 0; $('start').hidden = true; $('over').hidden = true;
+  $('pv').style.display = G.useCam ? 'block' : 'none'; $('status').style.display = G.useCam ? 'block' : 'none';
+  banner('GO! 🚀', '#3dff9a');
+}
+function endGame() {
+  G.mode = 'over'; boom(ship.position, 0xffa94d, 40, 14); ship.visible = false; sBoom(2); $('lost').style.display = 'none';
+  const best = Math.max(G.score, +(localStorage.getItem('hp3d-best') || 0)); try { localStorage.setItem('hp3d-best', best); } catch (e) {}
+  $('oText').innerHTML = 'Score: <b>' + G.score + '</b><br>Best: ' + best + ' · Wave ' + G.level + ' · Kills ' + G.kills;
+  setTimeout(() => { $('over').hidden = false; }, 900);
+}
+function hud() {
+  $('score').textContent = '⭐ ' + G.score; $('lvl').textContent = G.level; $('kills').textContent = G.kills;
+  $('hullF').style.width = G.hull + '%'; $('enF').style.width = G.energy + '%'; $('bmF').style.width = (100 - G.bomb / 8 * 100) + '%';
+  $('enF').style.background = G.shieldLock ? '#ff8fa3' : '#37d5ff';
+}
+
+const clock = new THREE.Clock();
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(.05, clock.getDelta()), tt = performance.now() / 1000;
+  if (G.useCam && G.mode === 'play') pump();
+  // starfield + scenery always move
+  const speed = G.mode === 'play' ? 26 + G.level * 3 : 8;
+  const sa = starGeo.attributes.position;
+  for (let i = 0; i < STARS; i++) { let z = sa.getZ(i) + speed * dt; if (z > 12) { z = -130; sa.setX(i, rnd(-70, 70)); sa.setY(i, rnd(-45, 45)); } sa.setZ(i, z); } sa.needsUpdate = true;
+  planet.rotation.y += dt * .05; ring.rotation.z += dt * .02;
+
+  if (G.mode === 'play') {
+    G.t += dt;
+    if (G.useCam) readHand(); else readMouse();
+    // ---- ship movement (smooth follow of the hand) ----
+    G.tx = INPUT.x * halfW; G.ty = INPUT.y * halfH;
+    const px = ship.position.x; ship.position.x = lerp(px, G.tx, 1 - Math.pow(.0008, dt)); ship.position.y = lerp(ship.position.y, G.ty, 1 - Math.pow(.0008, dt));
+    const vx = (ship.position.x - px) / Math.max(dt, .001); G.vx = lerp(G.vx, vx, .3);
+    ship.rotation.z = lerp(ship.rotation.z, -clamp(G.vx * .12, -.8, .8), .2); ship.rotation.x = lerp(ship.rotation.x, clamp((G.ty - ship.position.y) * .15, -.4, .4), .2);
+    shipLight.position.set(ship.position.x, ship.position.y + 1.5, 2);
+    flame.scale.set(1, .8 + Math.random() * .5, 1); flame.material.opacity = .7 + Math.random() * .3;
+    // ---- shield ----
+    if (G.energy <= 0) G.shieldLock = true; if (G.shieldLock && G.energy > 25) G.shieldLock = false;
+    const wantShield = INPUT.shield && !G.shieldLock && G.energy > 0;
+    if (wantShield && !G.shielding) sShield();
+    G.shielding = wantShield; shield.visible = G.shielding || G.invul > 0 && Math.sin(tt * 40) > 0;
+    G.energy = clamp(G.energy + (G.shielding ? -28 : 14) * dt, 0, 100);
+    shield.material.opacity = G.shielding ? .3 + Math.sin(tt * 12) * .08 : .15; shield.rotation.y += dt * 2;
+    // ---- weapons ----
+    G.fire -= dt; if (INPUT.fire && G.fire <= 0 && !G.shielding) { fireLaser(); G.fire = .16; }
+    if (INPUT.bomb) triggerBomb();
+    G.bomb = Math.max(0, G.bomb - dt); G.invul = Math.max(0, G.invul - dt);
+    // ---- spawn ----
+    G.spawn -= dt; if (G.spawn <= 0) { spawnEnemy(); G.spawn = Math.max(.32, 1.05 - G.level * .09) * rnd(.7, 1.2); }
+    // ---- shots ----
+    for (let i = G.shots.length - 1; i >= 0; i--) {
+      const s = G.shots[i]; s.position.z -= 85 * dt; let used = false;
+      for (const e of G.enemies) { if (e.type === 'crystal') continue; const d = s.position.distanceTo(e.mesh.position); if (d < e.rad + .3) { e.hp--; e.hit = .12; used = true; if (e.hp <= 0) killEnemy(e); else boom(s.position, 0xffffff, 4, 5); break; } }
+      if (used || s.position.z < -110) { scene.remove(s); G.shots.splice(i, 1); }
+    }
+    // ---- enemies ----
+    for (let i = G.enemies.length - 1; i >= 0; i--) {
+      const e = G.enemies[i], m = e.mesh; m.position.z += (speed + (e.type === 'drone' ? 8 : 0)) * dt;
+      if (e.type === 'drone') { e.ph += dt * 2.2; m.position.x = e.vx0 + Math.sin(e.ph) * e.amp; }
+      m.rotation.x += e.spin.x * dt; m.rotation.y += e.spin.y * dt; m.rotation.z += e.spin.z * dt * (e.type === 'crystal' ? 2.5 : 1);
+      if (e.hit > 0) { e.hit -= dt; if (e.type === 'rock') m.material = e.hit > 0 ? hitMat : astMat; }
+      const dx = m.position.x - ship.position.x, dy = m.position.y - ship.position.y, dz = m.position.z - ship.position.z;
+      if (Math.abs(dz) < e.rad + 1 && Math.hypot(dx, dy) < e.rad + (G.shielding ? 1.6 : .8)) {
+        if (e.type === 'crystal') { G.score += e.pts; G.energy = Math.min(100, G.energy + 15); G.hull = Math.min(100, G.hull + 4); scene.remove(m); G.enemies.splice(i, 1); boom(m.position, 0xffe27a, 18, 8); sCrystal(); continue; }
+        if (G.shielding) { G.energy = Math.max(0, G.energy - 6); killEnemy(e); continue; }
+        scene.remove(m); G.enemies.splice(i, 1); boom(m.position, 0xff9f6b, 20, 10); hurt(e.type === 'drone' ? 15 : 20); if (G.mode !== 'play') return; continue;
+      }
+      if (m.position.z > 14) { scene.remove(m); G.enemies.splice(i, 1); }
+    }
+    // ---- bomb ring ----
+    if (G.bombFx) { const b = G.bombFx; b.t += dt; b.r.scale.setScalar(1 + b.t * 70); b.r.material.opacity = Math.max(0, 1 - b.t * 1.5); b.r.lookAt(camera.position); if (b.t > .8) { scene.remove(b.r); G.bombFx = null; } }
+    hud();
+  }
+  // particles
+  for (let i = G.fx.length - 1; i >= 0; i--) { const f = G.fx[i]; f.life -= dt; f.m.position.addScaledVector(f.v, dt); f.m.material.opacity = clamp(f.life * 2, 0, 1); f.m.scale.setScalar(Math.max(.05, f.life)); if (f.life <= 0) { scene.remove(f.m); f.m.material.dispose(); G.fx.splice(i, 1); } }
+  // camera shake + damage flash
+  G.shake = Math.max(0, G.shake - dt); G.flash = Math.max(0, G.flash - dt);
+  camera.position.x = (Math.random() - .5) * G.shake * .6; camera.position.y = 1.6 + (Math.random() - .5) * G.shake * .6;
+  scene.background.setRGB(.02 + G.flash * .5, .03, .09);
+  renderer.render(scene, camera);
+}
+const hitMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, flatShading: true });
+
+$('camBtn').onclick = startCamera;
+$('mouseBtn').onclick = () => { audio(); G.useCam = false; ship.visible = true; startGame(); };
+$('againBtn').onclick = () => { audio(); ship.visible = true; startGame(); };
+$('menuBtn').onclick = () => { G.mode = 'menu'; ship.visible = true; $('over').hidden = true; $('start').hidden = false; note('Pick a mode to fly again!'); };
+document.addEventListener('gesturestart', e => e.preventDefault());
+resize(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
